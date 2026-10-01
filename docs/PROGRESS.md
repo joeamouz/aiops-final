@@ -8,7 +8,7 @@ Dernière mise à jour : 2026-10-01
 |---|---|---|---|
 | 0 | Audit (lecture seule) | ✅ Fait, en attente de validation utilisateur | — |
 | 1 | Applications (Juice Shop) | ⏳ Générateur de trafic à créer | — |
-| 2 | Log Collection | ✅ Installée et testée, en attente de "VALIDÉ couche 2" | — |
+| 2 | Log Collection | ✅ Validée | 2026-10-01 |
 | 3 | Ingestion / Stream Processing | ⏳ Non démarré | — |
 | 4 | Observabilité & Métriques | ⏳ Non démarré | — |
 | 5 | Moteur Prédictif | ⏳ Non démarré | — |
