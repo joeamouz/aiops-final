@@ -1,0 +1,91 @@
+{
+  "title": "Logs - Insights",
+  "uid": "logs-insights-aiops",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Logs totaux",
+      "type": "stat",
+      "datasource": "Loki",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(count_over_time({app=~\"juice-shop|keep\"} | json [$__range]))", "refId": "A", "queryType": "instant" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Erreurs (level=error)",
+      "type": "stat",
+      "datasource": "Loki",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "red" } } },
+      "targets": [
+        { "expr": "sum(count_over_time({app=~\"juice-shop|keep\"} | json | level=\"error\" [$__range]))", "refId": "A", "queryType": "instant" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Warnings (level=warn)",
+      "type": "stat",
+      "datasource": "Loki",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "orange" } } },
+      "targets": [
+        { "expr": "sum(count_over_time({app=~\"juice-shop|keep\"} | json | level=\"warn\" [$__range]))", "refId": "A", "queryType": "instant" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Logs par niveau dans le temps",
+      "type": "timeseries",
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "sum by (level) (count_over_time({app=~\"juice-shop|keep\"} | json [$__interval]))", "refId": "A", "legendFormat": "{{level}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Repartition par code HTTP (Juice Shop)",
+      "type": "bargauge",
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "sum by (http_status) (count_over_time({app=\"juice-shop\"} | json | http_status!=\"\" [$__range]))", "refId": "A", "legendFormat": "{{http_status}}", "queryType": "instant" }
+      ],
+      "options": { "displayMode": "gradient", "orientation": "horizontal" }
+    },
+    {
+      "id": 6,
+      "title": "Top endpoints en erreur (path + code HTTP)",
+      "type": "table",
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "topk(10, sum by (http_path, http_status) (count_over_time({app=\"juice-shop\"} | json | http_status >= 400 [$__range])))", "refId": "A", "queryType": "instant", "format": "table" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "occurrences" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "occurrences", "desc": true }] } }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Top types d'erreurs applicatives (stack traces)",
+      "type": "table",
+      "datasource": "Loki",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "topk(10, sum by (error_kind) (count_over_time({app=\"juice-shop\"} | json | message=~\"^Error:.*\" | line_format `{{.message}}` | regexp \"^Error: (?P<error_kind>[^:]+):\" [$__range])))", "refId": "A", "queryType": "instant", "format": "table" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "occurrences" } } },
+        { "id": "sortBy", "options": { "fields": {}, "sort": [{ "field": "occurrences", "desc": true }] } }
+      ]
+    }
+  ]
+}

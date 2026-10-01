@@ -173,6 +173,39 @@ docker volume rm aiops_loki-data
 docker restart aiops-vector-metrics
 ```
 
+### Ajout post-rapport 2 : dashboard "Logs - Insights" (agregation/stats sur les logs)
+
+**Demande utilisateur** : au-dela des logs bruts, pouvoir "interpreter" les logs
+(compter les occurrences par type d'erreur) pour aider a la prise de decision.
+
+**Solution** : nouveau dashboard Grafana `compose/grafana/provisioning/dashboards/json/logs-insights.json`
+(additif, ne modifie pas le dashboard "Juice Shop"), 100% requetes LogQL sur Loki :
+
+| Panneau | Requete LogQL (resumee) |
+|---|---|
+| Logs totaux / Erreurs / Warnings ($__range) | `sum(count_over_time({app=~"juice-shop\|keep"} \| json [...]))` filtre par `level` |
+| Logs par niveau dans le temps | `sum by (level) (count_over_time(... \| json [...]))` |
+| Repartition par code HTTP | `sum by (http_status) (count_over_time({app="juice-shop"} \| json \| http_status!="" [...]))` |
+| Top endpoints en erreur | `topk(10, sum by (http_path,http_status) (count_over_time(... http_status>=400 ...)))` |
+| Top types d'erreurs applicatives | extraction regex sur `message` (stack traces) via `line_format` + `regexp`, groupee par `error_kind` |
+
+**Requetes validees en direct contre l'API Loki avant integration** (lecture seule,
+derniere heure de donnees reelles) :
+- Par code HTTP : `200`→34, `401`→128, `500`→125
+- Top endpoints en erreur : `/rest/user/login` 401 ×132, `/rest/products/9999999` 500 ×91,
+  `/rest/products/1` 500 ×39
+- Type d'erreur applicative : `"Unexpected path"` ×135 (stack traces Juice Shop)
+
+**Fichier cree** : `compose/grafana/provisioning/dashboards/json/logs-insights.json`
+
+**Impact sur l'existant** : aucun redemarrage necessaire en theorie (le provisioning
+dashboards de Grafana recharge selon `updateIntervalSeconds: 30`) ; un `docker restart
+aiops-grafana` a ete fait pour forcer/confirmer le chargement immediat et verifier
+l'absence d'erreur dans les logs (`finished to provision dashboards`, aucune erreur
+JSON). Donnees et datasources Grafana inchangees (volume persistant).
+
+**A verifier visuellement** : http://localhost:3001 → dashboard **"Logs - Insights"**.
+
 **Mécanisme webhook Alertmanager → Keep** (trouvé dans le code source de Keep,
 `keep/api/routes/alerts.py` : route `POST /event/{provider_type}`) :
 `http://keep-backend:8080/alerts/event/prometheus` avec Basic Auth
