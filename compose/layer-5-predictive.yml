@@ -1,0 +1,27 @@
+networks:
+  aiops_default:
+    external: true
+
+services:
+  ml-engine:
+    build:
+      context: ../services/ml-engine
+    image: aiops-ml-engine:local
+    container_name: aiops-ml-engine
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "8001:8001"
+    env_file:
+      - ../aiops/.env
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      CONSUMER_TOPIC: "logs.parsed"
+      ANOMALY_TOPIC: "anomalies"
+      CONSUMER_GROUP: "ml-engine-v3"
+      KEEP_API_URL: "http://keep-backend:8080"
+      KEEP_API_KEY_NAME: "orangeci-test"
+      ANOMALY_THRESHOLD: "0.6"
+      WINDOW_SECONDS: "5"
+      HALFSPACETREES_WINDOW_SIZE: "20"

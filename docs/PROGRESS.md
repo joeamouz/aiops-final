@@ -11,7 +11,7 @@ Dernière mise à jour : 2026-10-01
 | 2 | Log Collection | ✅ Validée | 2026-10-01 |
 | 3 | Ingestion / Stream Processing | ✅ Validée | 2026-10-01 |
 | 4 | Observabilité & Métriques | ✅ Validée | 2026-10-01 |
-| 5 | Moteur Prédictif | ⏳ Non démarré | — |
+| 5 | Moteur Prédictif | ✅ Installée et testée, en attente de "VALIDÉ couche 5" | — |
 | 6 | Keep (existant à configurer) | ⏳ Providers/workflows à ajouter | — |
 | 7 | Alerting | ⏳ Non démarré | — |
 
@@ -240,6 +240,107 @@ docker compose -f compose/layer-4-observability.yml down
 docker volume rm aiops_prometheus-data aiops_grafana-data aiops_alertmanager-config  # destructif, donnees uniquement
 ```
 
+## Couche 5 — Rapport (installation et tests, 2026-10-01)
+
+### Choix technique (vérification de viabilité, comme demandé par CLAUDE.md)
+**Deep-loglizer écarté** : dépôt logpai figé depuis 2021 (19 commits, preprint 2021
+cité comme seule référence), dépendances PyTorch non maintenues. Alternative
+retenue :
+
+| Composant | Choix | Version |
+|---|---|---|
+| Parsing de logs en templates | `drain3-improved` (fork maintenu, le dépôt `drain3` original de logpai/IBM est à l'abandon) | `0.10.0` |
+| Détection d'anomalies en ligne | River `HalfSpaceTrees` | `0.25.0` |
+| Service | FastAPI + Uvicorn | `0.141.1` / `0.52.4` |
+| Client Kafka | `confluent-kafka` | `2.15.1` |
+| Image de base | `python:3.13-slim-bookworm` | — |
+
+### Protocole implémenté
+- **Mode `learning`** (défaut) : consomme `logs.parsed`, construit les templates
+  Drain3 (Juice Shop uniquement, voir plus bas) et nourrit `HalfSpaceTrees` avec
+  les features de chaque fenêtre (`rate`, `error_ratio`, `unique_templates`), sans
+  alerter.
+- **Mode `scoring`** (`POST /train/stop`) : chaque fenêtre est scorée ; au-delà de
+  `ANOMALY_THRESHOLD` (0.6) ou en cas de template jamais vu, une anomalie est
+  publiée dans le topic Kafka `anomalies` **et** envoyée à Keep (`POST
+  /alerts/event`, header `X-API-KEY`, clé `orangeci-test` réutilisée).
+- **Réentraînement** : `POST /train/start` recrée entièrement le `TemplateMiner`
+  et le modèle `HalfSpaceTrees` (reset complet, pas de reset partiel — voir bug
+  ci-dessous).
+- Deux signaux indépendants : **nouveau template** Drain3 (score déterministe 1.0,
+  Juice Shop uniquement) et **déviation statistique** de la fenêtre courante
+  (River `HalfSpaceTrees`).
+
+### Vérifications
+
+| Vérification | Résultat | Preuve |
+|---|---|---|
+| Conteneur `aiops-ml-engine` actif, `/health` OK | PASS | `tests/layer-5/test_ml_engine.sh` |
+| ≥50 événements traités pendant l'apprentissage | PASS | 3167 événements sur ~110s |
+| Passage en mode scoring confirmé | PASS | `{"mode":"scoring",...}` |
+| **Anomalie détectée après injection d'une rafale réelle (500/401)** | PASS | `statistical_burst`, score **0.991**, détectée en < 40s |
+| **Anomalie transmise à Keep** | PASS | log Keep : `POST /alerts/event HTTP/1.1" 202` |
+| Anomalie publiée dans le topic Kafka `anomalies` | PASS | `rpk topic consume anomalies` → JSON avec `kind`/`score`/`template`/`window_start`/`window_end` |
+
+**Script de test** : `tests/layer-5/test_ml_engine.sh` — **6/6 PASS**.
+
+### Problèmes rencontrés et corrigés (3 bugs réels pendant le développement)
+
+1. **Crash silencieux du thread consommateur.** Mon premier `/train/start` ne
+   réinitialisait que `id_to_cluster` et `clusters_counter` de Drain3, pas l'arbre
+   préfixe interne (`root_node`) → `AssertionError` dans `drain3/drain.py`
+   (`get_seq_distance`, `len(seq1) == len(seq2)`) à la première requête après reset,
+   tuant le thread de fond **sans aucun log d'erreur visible côté API** (le service
+   répondait toujours `/health` OK mais ne traitait plus aucun événement).
+   **Corrigé** : recréation complète de l'objet `TemplateMiner()` plutôt qu'un
+   reset manuel partiel ; ajout d'un `try/except` autour du traitement de chaque
+   événement et de chaque fenêtre pour qu'une erreur ne puisse plus jamais tuer le
+   thread silencieusement.
+2. **Faux positifs massifs depuis les logs Keep.** Les logs Keep (JSON verbeux,
+   IDs de workflow/stack traces en texte libre) font exploser le nombre de
+   templates Drain3 — quasi chaque ligne Keep est vue comme "nouvelle" (42
+   anomalies en quelques secondes dans un test, 0 provenant du trafic Juice Shop
+   réellement injecté). **Corrigé** : le mining de templates (signal "nouveau
+   template") est désormais limité aux logs d'accès Juice Shop (lignes courtes,
+   structurellement stables) ; les logs Keep contribuent seulement aux métriques
+   de volume/taux d'erreur de la fenêtre, pas au comptage de templates.
+3. **`HalfSpaceTrees` sous-entraîné.** Avec le `window_size` par défaut de River
+   (250) et des fenêtres de 15s, il aurait fallu ~1h d'apprentissage avant
+   d'obtenir un score non nul. **Corrigé** : fenêtres réduites à 5s
+   (`WINDOW_SECONDS=5`) et `window_size=20` — documenté comme compromis pour une
+   démo/un test court ; **à augmenter pour un déploiement réel** (`window_size=250`
+   et fenêtres plus longues, avec plusieurs heures/jours d'historique réel).
+
+### Mesure des faux positifs (demandée explicitement par CLAUDE.md)
+Après l'injection et le retour au calme (arrêt du générateur de trafic), le
+modèle a continué à signaler **chaque fenêtre suivante comme anormale** (15
+anomalies en ~35s sans aucune nouvelle injection) : la chute brutale du débit par
+rapport à la référence "trafic soutenu" apprise est elle-même vue comme une
+déviation statistique — ce qui est défendable sémantiquement (une chute de trafic
+peut aussi signaler une panne) mais **sans aucun mécanisme de cooldown/
+déduplication** (contrairement à Alertmanager en couche 4, `repeat_interval: 5m`),
+ce qui produirait un flot d'alertes redondantes en usage réel.
+**Non corrigé dans cette itération** — amélioration identifiée pour une passe
+ultérieure : ajouter un cooldown par type d'anomalie, ou entraîner sur un trafic
+incluant des périodes naturellement calmes pour que l'inactivité ne soit plus
+hors-référence.
+
+### Fichiers créés
+- `services/ml-engine/app.py`, `requirements.txt`, `Dockerfile`
+- `compose/layer-5-predictive.yml`
+- `tests/layer-5/test_ml_engine.sh`
+
+### Impact sur l'existant
+Aucun. Service additif (image construite localement, `aiops-ml-engine:local`),
+lecture seule de `aiops/.env` (réutilisation de la clé `orangeci-test`, déjà
+utilisée en couche 4, non modifiée).
+
+### Rollback
+```bash
+docker compose -f compose/layer-5-predictive.yml down
+docker rmi aiops-ml-engine:local
+```
+
 ## URLs et ports utiles (existant)
 - Keep UI : http://localhost:3000
 - Keep API : http://localhost:8080
@@ -259,6 +360,9 @@ docker volume rm aiops_prometheus-data aiops_grafana-data aiops_alertmanager-con
 - cAdvisor : http://localhost:8081
 - Blackbox exporter : http://localhost:9115
 - Loki : http://localhost:3100 (consommé via Grafana, pas d'UI propre)
+- Moteur prédictif (ml-engine) : http://localhost:8001
+  - `GET /health`, `GET /status` (mode, compteurs, dernière anomalie)
+  - `POST /train/start` (reset + apprentissage), `POST /train/stop` (passage en scoring)
 - Juice Shop (k8s) : pas de port hôte, ClusterIP interne 10.99.141.65:3000
   (joignable depuis le réseau Docker `aiops_default`)
 

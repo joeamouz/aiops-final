@@ -1,0 +1,6 @@
+fastapi==0.141.1
+uvicorn==0.52.4
+confluent-kafka==2.15.1
+drain3-improved==0.10.0
+river==0.25.0
+requests==2.34.2

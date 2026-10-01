@@ -67,7 +67,7 @@ Fichiers compose existants (non modifiés) : `aiops/docker-compose.orangeci.yml`
 | 4 | Blackbox exporter | 9115 | ✅ créé |
 | 4 | Vector métriques (prometheus_exporter) | 9598 | ✅ créé |
 | 4 | Grafana Loki | 3100 | ✅ créé |
-| 5 | Moteur prédictif (FastAPI) | 8001 (8000 pris par demo-app) | à créer |
+| 5 | Moteur prédictif (FastAPI) | 8001 (8000 pris par demo-app) | ✅ créé |
 
 ## 3. Plan réseau
 Réseau Docker partagé `aiops_default` (existant) réutilisé par toutes les nouvelles
