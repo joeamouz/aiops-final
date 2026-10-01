@@ -51,3 +51,15 @@ sinks:
       - "logs_level_metric"
     address: "0.0.0.0:9598"
     flush_period_secs: 120
+
+  loki_out:
+    type: loki
+    inputs:
+      - "logs_parsed_in"
+    endpoint: "http://loki:3100"
+    encoding:
+      codec: json
+    labels:
+      app: "{{app}}"
+      level: "{{level}}"
+      job: "vector"

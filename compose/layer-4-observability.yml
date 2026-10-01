@@ -9,6 +9,8 @@ volumes:
     name: aiops_grafana-data
   alertmanager-config:
     name: aiops_alertmanager-config
+  loki-data:
+    name: aiops_loki-data
 
 services:
   prometheus:
@@ -71,6 +73,20 @@ services:
       - ./blackbox/blackbox.yml:/config/blackbox.yml:ro
     command:
       - "--config.file=/config/blackbox.yml"
+
+  loki:
+    image: grafana/loki:3.7.8
+    container_name: aiops-loki
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
 
   vector-metrics:
     image: timberio/vector:0.58.0-debian

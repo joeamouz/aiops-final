@@ -16,7 +16,7 @@ check() {
 
 echo "== Test couche 4 : observabilite (Prometheus/Grafana/Alertmanager/cAdvisor/Blackbox) =="
 
-for c in aiops-prometheus aiops-grafana aiops-alertmanager aiops-cadvisor aiops-blackbox-exporter aiops-vector-metrics; do
+for c in aiops-prometheus aiops-grafana aiops-alertmanager aiops-cadvisor aiops-blackbox-exporter aiops-vector-metrics aiops-loki; do
   r=$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null)
   [ "$r" = "true" ]; check "Conteneur $c actif" $?
 done
@@ -40,6 +40,22 @@ RULES="$(curl -s http://localhost:9090/api/v1/rules)"
 for rule in JuiceShopDown KeepDown JuiceShopHighErrorRate; do
   echo "$RULES" | grep -q "\"$rule\""; check "Regle d'alerte '$rule' chargee" $?
 done
+
+# Logs applicatifs dans Loki (via Vector, sink loki_out sur vector-metrics)
+LOKI_READY="$(curl -s http://localhost:3100/ready)"
+[ "$LOKI_READY" = "ready" ]; check "Loki pret (/ready)" $?
+
+LOKI_APPS="$(curl -s http://localhost:3100/loki/api/v1/label/app/values)"
+echo "$LOKI_APPS" | grep -q '"juice-shop"'; check "Logs app=juice-shop presents dans Loki" $?
+echo "$LOKI_APPS" | grep -q '"keep"'; check "Logs app=keep presents dans Loki" $?
+
+# Note : verifie via les logs Grafana (pas d'appel API /datasources - necessite
+# les identifiants admin actuels, non connus du script). Capture d'abord dans une
+# variable : "docker logs | grep -q" direct + "set -o pipefail" peut faire
+# remonter un faux FAIL (SIGPIPE sur docker logs quand grep -q sort tot).
+GRAFANA_LOGS="$(docker logs aiops-grafana 2>&1)"
+case "$GRAFANA_LOGS" in *'datasource from configuration" name=Loki'*) r=0;; *) r=1;; esac
+check "Datasource Grafana 'Loki' provisionnee (vu dans les logs au demarrage)" $r
 
 # Declenchement reel d'une alerte (rafale 401/500) et verification bout-en-bout vers Keep
 JUICE_IP=$(kubectl get svc -n juice-shop juice-shop -o jsonpath='{.spec.clusterIP}' 2>/dev/null)

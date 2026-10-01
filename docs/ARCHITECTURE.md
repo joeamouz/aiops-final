@@ -66,6 +66,7 @@ Fichiers compose existants (non modifiés) : `aiops/docker-compose.orangeci.yml`
 | 4 | cAdvisor | 8081 | ✅ créé |
 | 4 | Blackbox exporter | 9115 | ✅ créé |
 | 4 | Vector métriques (prometheus_exporter) | 9598 | ✅ créé |
+| 4 | Grafana Loki | 3100 | ✅ créé |
 | 5 | Moteur prédictif (FastAPI) | 8001 (8000 pris par demo-app) | à créer |
 
 ## 3. Plan réseau

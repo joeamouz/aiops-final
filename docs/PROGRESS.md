@@ -111,9 +111,67 @@ docker volume rm aiops_redpanda-data   # si on veut aussi supprimer les donnees 
 | Alerte déclenchée volontairement (rafale 401/500 réelle) | PASS | `JuiceShopHighErrorRate` → état `firing` en ~1-2 min |
 | Alertmanager reçoit l'alerte | PASS | `GET /api/v2/alerts` → `JuiceShopHighErrorRate active` |
 | **Webhook Alertmanager → Keep livré** | PASS | log Keep : `POST /alerts/event/prometheus HTTP/1.1" 202` |
-| Grafana provisionné (datasource + dashboard "Juice Shop") | PASS | http://localhost:3001 (admin/admin), dashboard "Juice Shop" visible |
+| Grafana provisionné (datasource + dashboard "Juice Shop") | PASS | http://localhost:3001, dashboard "Juice Shop" visible |
+| **Loki** `3.7.8` pret (`/ready`) | PASS | `GET /ready` → `ready` |
+| **Logs applicatifs `app="juice-shop"` dans Loki** | PASS | requete `{app="juice-shop"}` → lignes d'acces (401/500) + stack traces |
+| **Logs applicatifs `app="keep"` dans Loki** | PASS | requete `{app="keep"}` → heartbeats + `/healthcheck` |
+| **Datasource Grafana "Loki" provisionnee** | PASS | log Grafana : `inserting datasource from configuration" name=Loki` |
+| Panneau "Logs applicatifs" ajoute au dashboard "Juice Shop" | PASS | visible sous les 4 panneaux metriques existants |
 
-**Script de test** : `tests/layer-4/test_observability.sh` — **18/18 PASS**.
+**Script de test** : `tests/layer-4/test_observability.sh` — **23/23 PASS** (18 initiaux + 5 ajoutes pour Loki).
+
+### Ajout post-rapport : logs applicatifs dans Grafana (Loki)
+
+**Constat utilisateur** : seules les metriques Prometheus etaient visibles dans Grafana,
+aucun moyen de consulter les logs bruts.
+
+**Solution** : Grafana Loki `3.7.8` (single-binary, stockage filesystem local, schema
+`tsdb`/`v13` — config verifiee sur la doc officielle actuelle). Vector (`aiops-vector-metrics`,
+sink `loki_out`) pousse directement le topic Kafka `logs.parsed` deja consomme vers Loki —
+pas de Promtail necessaire. Labels **faible cardinalite uniquement** : `app`, `level`,
+`job=vector` (jamais `http_path` ni timestamp, pour eviter de degrader les perfs Loki).
+
+**Fichiers crees** :
+- `compose/loki/loki-config.yaml`
+- `compose/grafana/provisioning/datasources/loki.yml`
+
+**Fichiers modifies** :
+- `compose/layer-4-observability.yml` (service `loki` + volume `aiops_loki-data`)
+- `compose/vector/vector-metrics.yaml` (sink `loki_out`, consomme `logs_parsed_in` deja present)
+- `compose/grafana/provisioning/dashboards/json/juice-shop.json` (panneau "Logs applicatifs")
+- `tests/layer-4/test_observability.sh` (+5 verifications Loki)
+
+**Probleme rencontre et corrige** : config Loki initiale refusee au demarrage
+(`CONFIG ERROR: invalid compactor config: compactor.delete-request-store should be
+configured when retention is enabled`) — `retention_enabled: true` necessite un
+`delete_request_store` (S3/GCS/Azure, non pertinent ici). Corrige en retirant
+`retention_enabled` (pas de suppression automatique des anciens logs dans ce
+labo — a revisiter si la retention devient un besoin reel).
+
+**Point d'attention** : la verification via l'API Grafana (`/api/datasources`) a echoue
+avec `admin`/`admin` (401) — le mot de passe a probablement ete change manuellement
+depuis le premier rapport. Verification faite autrement (logs de provisioning Grafana
++ requetes directes sur l'API Loki). A confirmer visuellement dans l'UI ; si le login
+`admin`/`admin` ne fonctionne plus, me donner le mot de passe actuel ou le reinitialiser
+vous-meme dans l'UI.
+
+**Bug corrige pendant les tests** : `docker logs | grep -q` sous `set -o pipefail` peut
+faussement echouer (SIGPIPE sur le process qui ecrit les logs quand `grep -q` sort tot
+apres avoir trouve sa correspondance) — deja rencontre et corrige de la meme facon en
+couche 2/3. Corrige ici aussi (capture dans une variable puis `case ... in *motif*)`).
+
+**Impact sur l'existant** : additif. Seul redemarrage : `aiops-vector-metrics`
+(consumer group Kafka, pas de perte) et `aiops-grafana` (pour charger la nouvelle
+datasource — ses donnees/dashboards persistent via le volume existant).
+
+**Rollback (logs/Loki uniquement)** :
+```bash
+docker compose -f compose/layer-4-observability.yml stop loki
+docker rm aiops-loki
+docker volume rm aiops_loki-data
+# puis retirer le sink loki_out de compose/vector/vector-metrics.yaml et redemarrer :
+docker restart aiops-vector-metrics
+```
 
 **Mécanisme webhook Alertmanager → Keep** (trouvé dans le code source de Keep,
 `keep/api/routes/alerts.py` : route `POST /event/{provider_type}`) :
@@ -162,10 +220,12 @@ docker volume rm aiops_prometheus-data aiops_grafana-data aiops_alertmanager-con
 - `docker exec aiops-redpanda rpk topic consume logs.parsed -o 0`
 - `docker exec aiops-redpanda rpk group describe vector-router`
 - Prometheus : http://localhost:9090 (Targets, Alerts, Graph)
-- Grafana : http://localhost:3001 (admin/admin — a changer en production)
+- Grafana : http://localhost:3001 (admin/admin a l'origine ; mot de passe visiblement
+  change depuis — a confirmer avec l'utilisateur)
 - Alertmanager : http://localhost:9093
 - cAdvisor : http://localhost:8081
 - Blackbox exporter : http://localhost:9115
+- Loki : http://localhost:3100 (consommé via Grafana, pas d'UI propre)
 - Juice Shop (k8s) : pas de port hôte, ClusterIP interne 10.99.141.65:3000
   (joignable depuis le réseau Docker `aiops_default`)
 
