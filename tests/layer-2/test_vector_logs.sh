@@ -43,17 +43,22 @@ check "Champ level (niveau) correctement extrait" $r
 
 JUICE_IP=$(kubectl get svc -n juice-shop juice-shop -o jsonpath='{.spec.clusterIP}' 2>/dev/null)
 if [ -n "$JUICE_IP" ]; then
-  docker run --rm --network aiops_default curlimages/curl:8.10.1 \
-    -s -o /dev/null http://"$JUICE_IP":3000/ 2>/dev/null
-  sleep 2
+  docker run --rm --network aiops_default curlimages/curl:8.10.1 sh -c "
+    curl -s -o /dev/null http://$JUICE_IP:3000/
+    curl -s -o /dev/null http://$JUICE_IP:3000/rest/products/search?q=test
+    curl -s -o /dev/null -X POST http://$JUICE_IP:3000/rest/user/login
+  " 2>/dev/null
+  sleep 4
   VECTOR_LOGS2="$(docker logs aiops-vector 2>&1)"
-  if case "$VECTOR_LOGS2" in *'"app":"juice-shop"'*) true;; *) false;; esac; then
-    echo "[INFO] Logs Juice Shop detectes sur stdout (inattendu avec la config par defaut)"
-  else
-    echo "[INFO-CONNU] Aucun log Juice Shop sur stdout : les acces HTTP sont ecrits dans" \
-         "un fichier interne au conteneur (morgan -> logs/access.log.<DATE>), pas sur" \
-         "stdout. Limitation documentee dans docs/ARCHITECTURE.md (option sidecar en attente)."
-  fi
+
+  case "$VECTOR_LOGS2" in *'"app":"juice-shop"'*) r=0;; *) r=1;; esac
+  check "Logs Juice Shop captures via sidecar access-log-shipper (Option A)" $r
+
+  case "$VECTOR_LOGS2" in *'io.kubernetes.container.name":"access-log-shipper"'*) r=0;; *) r=1;; esac
+  check "Sidecar access-log-shipper identifie dans les logs" $r
+
+  case "$VECTOR_LOGS2" in *'HTTP/1.1\" 401'*) r=0;; *) r=1;; esac
+  check "Code de statut HTTP (401 login) visible dans le log d'acces" $r
 fi
 
 echo "== Resultat : $PASS PASS / $FAIL FAIL =="

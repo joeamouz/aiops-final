@@ -1,0 +1,40 @@
+# Patch additif (strategic merge) sur le Deployment juice-shop existant.
+# N'altere pas le conteneur applicatif "juice-shop" (meme image, meme commande) :
+# ajoute seulement un volume partage (emptyDir) et un sidecar qui "tail -F" le
+# fichier de logs d'acces HTTP (ecrit par morgan) pour l'exposer sur stdout,
+# capturable par Vector (couche 2).
+#
+# Application :
+#   kubectl patch -n juice-shop deployment juice-shop --type strategic --patch-file k8s/juice-shop-access-log-sidecar-patch.yaml
+#
+# Rollback :
+#   kubectl rollout undo -n juice-shop deployment juice-shop
+spec:
+  template:
+    spec:
+      volumes:
+        - name: access-logs
+          emptyDir: {}
+      containers:
+        - name: juice-shop
+          volumeMounts:
+            - name: access-logs
+              mountPath: /juice-shop/logs
+        - name: access-log-shipper
+          image: busybox:1.38.0
+          command: ["sh", "-c"]
+          args:
+            - |
+              while [ ! -f /juice-logs/access.log.$(date +%Y-%m-%d) ]; do sleep 2; done
+              exec tail -n +1 -F /juice-logs/access.log.$(date +%Y-%m-%d)
+          volumeMounts:
+            - name: access-logs
+              mountPath: /juice-logs
+              readOnly: true
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "16Mi"
+            limits:
+              cpu: "100m"
+              memory: "32Mi"

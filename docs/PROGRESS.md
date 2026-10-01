@@ -20,31 +20,50 @@ Dernière mise à jour : 2026-10-01
 | Vérification | Résultat | Preuve |
 |---|---|---|
 | Conteneur `aiops-vector` actif | PASS | `docker inspect -f '{{.State.Running}}' aiops-vector` → `true` |
-| Capture des logs Keep (`app=keep`) | PASS | `tests/layer-2/test_vector_logs.sh` → 118 events capturés après appel `/healthcheck` |
-| Champ `container_name` présent | PASS | `"container_name":"aiops-keep-backend-1"` dans le JSON de sortie |
+| Capture des logs Keep (`app=keep`) | PASS | 118+ events capturés après appel `/healthcheck` |
+| Champ `container_name` présent | PASS | `"container_name":"aiops-keep-backend-1"` |
 | Champ `timestamp` présent | PASS | `"timestamp":"2026-10-01T16:19:30..."` |
-| Champ `level` (niveau) extrait | PASS | `"level":"info"` (après correctif de casse `downcase()` en VRL) |
-| Logs d'accès HTTP Juice Shop sur stdout | **FAIL (attendu)** | Trafic réel envoyé (200, 401) → **0** événement `app=juice-shop` capturé |
+| Champ `level` (niveau) extrait | PASS | `"level":"info"` (`downcase()` en VRL) |
+| Logs d'accès HTTP Juice Shop (Option A — sidecar) | PASS | `"message":"::ffff:10.1.0.1 - - [01/Oct/2026:16:32:06] \"POST /rest/user/login HTTP/1.1\" 401 26..."` |
+| Sidecar `access-log-shipper` identifié | PASS | `io.kubernetes.container.name":"access-log-shipper"` |
+| Code de statut HTTP visible dans le log d'accès | PASS | `401` sur tentative de login |
 
-**Script de test** : `tests/layer-2/test_vector_logs.sh` (exécutable, 5/5 PASS sur les vérifications applicables).
+**Script de test** : `tests/layer-2/test_vector_logs.sh` — **8/8 PASS**.
 
-**Problème rencontré et diagnostic** : Juice Shop écrit ses logs d'accès HTTP dans un
-fichier interne au conteneur (`morgan` → `logs/access.log.<DATE>`), jamais sur
-stdout/stderr. `docker_logs` ne peut donc voir que les messages de démarrage
-(Winston `info:`/`warn:`), pas le détail des requêtes HTTP. Confirmé par test réel
-(trafic normal + 404 + login raté envoyés, aucun nouvel événement Juice Shop capturé).
-**Non corrigé dans cette itération** (Option B retenue : stdout uniquement, zéro
-impact sur le déploiement Juice Shop existant). Option A (sidecar de lecture du
-fichier de logs) reste proposée pour une itération ultérieure, **sous réserve de
-votre accord explicite** puisqu'elle modifierait le Deployment k8s existant.
+**Option A implémentée** (accord explicite reçu le 2026-10-01) : patch additif du
+Deployment k8s `juice-shop` (`k8s/juice-shop-access-log-sidecar-patch.yaml`) :
+- Ajout d'un volume `emptyDir` `access-logs`, monté dans le conteneur applicatif
+  `juice-shop` à `/juice-shop/logs` (même chemin qu'avant, juste backé par un volume
+  partagé désormais).
+- Ajout d'un sidecar `access-log-shipper` (`busybox:1.38.0`) qui `tail -F` le fichier
+  du jour et l'expose sur son propre stdout → capturé par Vector via le label Docker
+  `io.kubernetes.pod.namespace=juice-shop` (plus robuste que le prefix-matching sur
+  nom de conteneur généré par k8s).
+- **Rollout sans interruption** : stratégie `RollingUpdate` (maxSurge=25%→1 pour
+  1 replica) → nouveau pod créé et prêt avant terminaison de l'ancien (`kubectl
+  rollout status` → "successfully rolled out", 0 downtime observé).
+- Conteneur applicatif Juice Shop **non modifié** (même image `bkimminich/juice-shop`,
+  aucun changement de commande/config).
 
-**Impact sur l'existant** : aucun. Un seul conteneur additif (`aiops-vector`) sur le
-réseau `aiops_default`, aucune modification des conteneurs/volumes/réseaux existants.
+**Limitation connue (mineure, non bloquante)** : le champ `level` reste `"unknown"`
+pour les lignes d'accès HTTP (le format `combined` de morgan ne contient pas les mots
+`info`/`warn`/`error`) ; le niveau pertinent pour ces lignes est le code de statut
+HTTP, déjà visible dans `message`. Une extraction dédiée (regex sur le statut HTTP)
+pourra être ajoutée en couche 3 (transform/routage) si besoin.
+
+**Impact sur l'existant** :
+- `aiops-vector` : conteneur additif sur `aiops_default`, rien d'existant modifié.
+- Deployment `juice-shop` : modifié (volume + sidecar additifs), rollout sans coupure
+  constatée. Le conteneur applicatif lui-même est inchangé.
 
 **Rollback** :
 ```bash
+# Couche 2 (Vector)
 docker compose -f compose/layer-2-collect.yml down
-docker volume rm aiops_vector-output   # si on veut aussi supprimer les données collectées
+docker volume rm aiops_vector-output   # si on veut aussi supprimer les donnees collectees
+
+# Sidecar Juice Shop (retour a la version precedente du Deployment)
+kubectl rollout undo -n juice-shop deployment juice-shop
 ```
 
 ## URLs et ports utiles (existant)
@@ -65,9 +84,7 @@ docker volume rm aiops_vector-output   # si on veut aussi supprimer les données
   `juice-shop/` restent des clones upstream non versionnés ici.
 
 ## Points en attente de décision utilisateur
-1. Logs HTTP Juice Shop (fichier interne, pas stdout) : solution à valider en couche 2
-   (piste envisagée : sidecar de lecture du volume de logs — modifierait le déploiement
-   k8s existant, nécessite accord explicite).
+1. ~~Logs HTTP Juice Shop~~ → **Résolu** : Option A (sidecar) implémentée et testée.
 2. RAM Docker Desktop (7.66 Gio actuel) : à augmenter si possible (10-12 Gio recommandé)
    pour Kafka/Redpanda + Prometheus + Grafana + moteur ML.
 3. Secrets couche 6/7 (clés API Keep, webhook Slack, clé PagerDuty) : à fournir au

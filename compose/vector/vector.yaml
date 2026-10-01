@@ -3,17 +3,22 @@ api:
   address: "0.0.0.0:8686"
 
 sources:
-  docker_host_logs:
+  keep_logs:
     type: docker_logs
     include_containers:
-      - "k8s_juice-shop"
       - "aiops-keep"
+
+  juice_shop_logs:
+    type: docker_logs
+    include_labels:
+      - "io.kubernetes.pod.namespace=juice-shop"
 
 transforms:
   enrich:
     type: remap
     inputs:
-      - "docker_host_logs"
+      - "keep_logs"
+      - "juice_shop_logs"
     source: |
       .level = "unknown"
       msg = downcase(string!(.message))
