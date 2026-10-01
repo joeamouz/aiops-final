@@ -1,0 +1,13 @@
+.env
+*.env
+!.env.example
+
+# Sous-dépôts upstream clonés (gérés par leurs propres .git, non inclus ici)
+/aiops/
+/juice-shop/
+
+# Divers
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store
