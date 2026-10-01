@@ -6,6 +6,7 @@ groups:
         for: 1m
         labels:
           severity: critical
+          service: juice-shop
         annotations:
           summary: "Juice Shop ne repond plus"
           description: "La sonde Blackbox sur Juice Shop echoue depuis 1 minute."
@@ -15,6 +16,7 @@ groups:
         for: 1m
         labels:
           severity: critical
+          service: keep
         annotations:
           summary: "Keep ne repond plus"
           description: "La sonde Blackbox sur Keep (healthcheck) echoue depuis 1 minute."
@@ -27,6 +29,7 @@ groups:
         for: 1m
         labels:
           severity: warning
+          service: juice-shop
         annotations:
           summary: "Taux d'erreurs 5xx eleve sur Juice Shop"
           description: "Plus de 20% des requetes recues par Juice Shop sur les 2 dernieres minutes sont en erreur 5xx."

@@ -107,6 +107,7 @@ def send_to_keep(alert_id: str, name: str, severity: str, description: str):
         "status": "firing",
         "severity": severity,
         "source": ["ml-engine"],
+        "service": "juice-shop",
         "description": description,
     }
     try:
