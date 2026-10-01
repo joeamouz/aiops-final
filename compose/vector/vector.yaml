@@ -1,0 +1,42 @@
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+
+sources:
+  docker_host_logs:
+    type: docker_logs
+    include_containers:
+      - "k8s_juice-shop"
+      - "aiops-keep"
+
+transforms:
+  enrich:
+    type: remap
+    inputs:
+      - "docker_host_logs"
+    source: |
+      .level = "unknown"
+      msg = downcase(string!(.message))
+      if contains(msg, "error") { .level = "error" }
+      else if contains(msg, "warn") { .level = "warn" }
+      else if contains(msg, "info") { .level = "info" }
+      name = string!(.container_name)
+      .app = "unknown"
+      if contains(name, "juice-shop") { .app = "juice-shop" }
+      else if contains(name, "keep") { .app = "keep" }
+
+sinks:
+  console_debug:
+    type: console
+    inputs:
+      - "enrich"
+    encoding:
+      codec: json
+
+  file_out:
+    type: file
+    inputs:
+      - "enrich"
+    path: "/var/lib/vector/output/events-%Y-%m-%d.log"
+    encoding:
+      codec: json
