@@ -60,11 +60,12 @@ Fichiers compose existants (non modifiés) : `aiops/docker-compose.orangeci.yml`
 | 3 | Redpanda admin | 9644 | ✅ créé |
 | 3 | Redpanda Console | 8089 | ✅ créé |
 | 3 | Vector routeur (API) | 8687 | ✅ créé |
-| 4 | Prometheus | 9090 | à créer |
-| 4 | Alertmanager | 9093 | à créer |
-| 4 | Grafana | **3001** (3000 pris par Keep) | à créer |
-| 4 | cAdvisor | 8081 | à créer |
-| 4 | Blackbox exporter | 9115 | à créer |
+| 4 | Prometheus | 9090 | ✅ créé |
+| 4 | Alertmanager | 9093 | ✅ créé |
+| 4 | Grafana | **3001** (3000 pris par Keep) | ✅ créé |
+| 4 | cAdvisor | 8081 | ✅ créé |
+| 4 | Blackbox exporter | 9115 | ✅ créé |
+| 4 | Vector métriques (prometheus_exporter) | 9598 | ✅ créé |
 | 5 | Moteur prédictif (FastAPI) | 8001 (8000 pris par demo-app) | à créer |
 
 ## 3. Plan réseau

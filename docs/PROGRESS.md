@@ -10,7 +10,7 @@ Dernière mise à jour : 2026-10-01
 | 1 | Applications (Juice Shop) | ⏳ Générateur de trafic à créer | — |
 | 2 | Log Collection | ✅ Validée | 2026-10-01 |
 | 3 | Ingestion / Stream Processing | ✅ Validée | 2026-10-01 |
-| 4 | Observabilité & Métriques | ⏳ Non démarré | — |
+| 4 | Observabilité & Métriques | ✅ Installée et testée, en attente de "VALIDÉ couche 4" | — |
 | 5 | Moteur Prédictif | ⏳ Non démarré | — |
 | 6 | Keep (existant à configurer) | ⏳ Providers/workflows à ajouter | — |
 | 7 | Alerting | ⏳ Non démarré | — |
@@ -99,6 +99,56 @@ docker compose -f compose/layer-3-ingestion.yml down
 docker volume rm aiops_redpanda-data   # si on veut aussi supprimer les donnees Kafka
 ```
 
+## Couche 4 — Rapport (installation et tests, 2026-10-01)
+
+| Vérification | Résultat | Preuve |
+|---|---|---|
+| Prometheus v3.15.0 : toutes les targets UP | PASS | `prometheus`, `cadvisor`, `vector-metrics`, `blackbox-http` (x2) → `health: up` |
+| Blackbox : `probe_success=1` pour Juice Shop et Keep | PASS | requête `probe_success` sur l'API Prometheus |
+| cAdvisor v0.60.6 : métriques conteneur Juice Shop exposées | PASS | `container_memory_usage_bytes{container_label_io_kubernetes_container_name="juice-shop"}` |
+| Vector métriques : `juice_shop_http_requests_total` (401/500) | PASS | compteur par `status` alimenté par le trafic réel |
+| 3 règles d'alerte chargées | PASS | `JuiceShopDown`, `KeepDown`, `JuiceShopHighErrorRate` |
+| Alerte déclenchée volontairement (rafale 401/500 réelle) | PASS | `JuiceShopHighErrorRate` → état `firing` en ~1-2 min |
+| Alertmanager reçoit l'alerte | PASS | `GET /api/v2/alerts` → `JuiceShopHighErrorRate active` |
+| **Webhook Alertmanager → Keep livré** | PASS | log Keep : `POST /alerts/event/prometheus HTTP/1.1" 202` |
+| Grafana provisionné (datasource + dashboard "Juice Shop") | PASS | http://localhost:3001 (admin/admin), dashboard "Juice Shop" visible |
+
+**Script de test** : `tests/layer-4/test_observability.sh` — **18/18 PASS**.
+
+**Mécanisme webhook Alertmanager → Keep** (trouvé dans le code source de Keep,
+`keep/api/routes/alerts.py` : route `POST /event/{provider_type}`) :
+`http://keep-backend:8080/alerts/event/prometheus` avec Basic Auth
+(`username: keep`, `password: <clé API role webhook>`). Décision utilisateur :
+réutilisation de la clé existante `orangeci-test` (déjà dans `aiops/.env`, non modifié).
+
+**Génération du secret dans la config Alertmanager** : un conteneur init
+(`alertmanager-config-init`, busybox) reçoit `aiops/.env` via `env_file` et fait
+l'extraction/substitution **à l'intérieur du conteneur** (`sed` sur un template) —
+la clé n'a jamais été manipulée dans une commande shell de ma part (bloqué une fois
+par le classificateur de sécurité "Credential Leakage" avec ma première approche, qui
+extrayait la clé directement dans un `Bash` ; j'ai corrigé en déplaçant l'extraction
+côté conteneur). Le fichier généré contenant le secret vit uniquement dans un volume
+Docker nommé (`aiops_alertmanager-config`), jamais sur le disque du dépôt.
+
+**Point d'attention mineur** : la déduplication native d'Alertmanager
+(`repeat_interval: 5m`) signifie qu'une alerte déjà active ne redéclenche pas un
+nouvel envoi webhook avant ce délai — comportement normal, pas un bug.
+
+**Limitation connue** : les requêtes `GET /` (page d'accueil Juice Shop, servie en
+statique) ne passent pas par `morgan` et n'apparaissent donc pas dans les métriques
+HTTP ; seules les routes API (`/rest/...`) sont comptabilisées. À prendre en compte
+pour le générateur de trafic de la couche 1 (préférer des routes API).
+
+**Impact sur l'existant** : aucun. Tous les services sont additifs. Le seul
+changement touchant un composant existant est la **lecture** (non modification) de
+`aiops/.env` pour le webhook Alertmanager.
+
+**Rollback** :
+```bash
+docker compose -f compose/layer-4-observability.yml down
+docker volume rm aiops_prometheus-data aiops_grafana-data aiops_alertmanager-config  # destructif, donnees uniquement
+```
+
 ## URLs et ports utiles (existant)
 - Keep UI : http://localhost:3000
 - Keep API : http://localhost:8080
@@ -111,6 +161,11 @@ docker volume rm aiops_redpanda-data   # si on veut aussi supprimer les donnees 
 - Redpanda broker (externe) : localhost:19092 ; admin : localhost:9644
 - `docker exec aiops-redpanda rpk topic consume logs.parsed -o 0`
 - `docker exec aiops-redpanda rpk group describe vector-router`
+- Prometheus : http://localhost:9090 (Targets, Alerts, Graph)
+- Grafana : http://localhost:3001 (admin/admin — a changer en production)
+- Alertmanager : http://localhost:9093
+- cAdvisor : http://localhost:8081
+- Blackbox exporter : http://localhost:9115
 - Juice Shop (k8s) : pas de port hôte, ClusterIP interne 10.99.141.65:3000
   (joignable depuis le réseau Docker `aiops_default`)
 

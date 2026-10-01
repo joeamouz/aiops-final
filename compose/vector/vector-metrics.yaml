@@ -1,0 +1,53 @@
+api:
+  enabled: true
+  address: "0.0.0.0:8688"
+
+sources:
+  logs_parsed_in:
+    type: kafka
+    bootstrap_servers: "redpanda:9092"
+    group_id: "vector-metrics"
+    topics:
+      - "logs.parsed"
+    decoding:
+      codec: json
+
+transforms:
+  http_events_only:
+    type: filter
+    inputs:
+      - "logs_parsed_in"
+    condition: 'exists(.http_status)'
+
+  http_requests_metric:
+    type: log_to_metric
+    inputs:
+      - "http_events_only"
+    metrics:
+      - type: counter
+        field: "http_status"
+        name: "juice_shop_http_requests_total"
+        tags:
+          status: "{{http_status}}"
+          app: "{{app}}"
+
+  logs_level_metric:
+    type: log_to_metric
+    inputs:
+      - "logs_parsed_in"
+    metrics:
+      - type: counter
+        field: "level"
+        name: "logs_total"
+        tags:
+          level: "{{level}}"
+          app: "{{app}}"
+
+sinks:
+  prometheus_out:
+    type: prometheus_exporter
+    inputs:
+      - "http_requests_metric"
+      - "logs_level_metric"
+    address: "0.0.0.0:9598"
+    flush_period_secs: 120

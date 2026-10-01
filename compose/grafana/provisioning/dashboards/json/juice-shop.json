@@ -1,0 +1,67 @@
+{
+  "title": "Juice Shop",
+  "uid": "juice-shop-aiops",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Disponibilite (Blackbox probe)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "probe_success{app=\"juice-shop\"}", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Latence sonde HTTP",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "probe_duration_seconds{app=\"juice-shop\"}", "refId": "A", "legendFormat": "latence (s)" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Requetes HTTP par code de statut",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "sum by (status) (rate(juice_shop_http_requests_total[2m]))", "refId": "A", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "CPU conteneur Juice Shop",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 6 },
+      "targets": [
+        { "expr": "rate(container_cpu_usage_seconds_total{container_label_io_kubernetes_container_name=\"juice-shop\"}[2m])", "refId": "A", "legendFormat": "cpu (cores)" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "RAM conteneur Juice Shop",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 6 },
+      "targets": [
+        { "expr": "container_memory_usage_bytes{container_label_io_kubernetes_container_name=\"juice-shop\"}", "refId": "A", "legendFormat": "memoire (bytes)" }
+      ]
+    }
+  ]
+}

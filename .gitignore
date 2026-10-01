@@ -6,6 +6,8 @@
 /aiops/
 /juice-shop/
 
+.claude/
+
 # Divers
 node_modules/
 __pycache__/

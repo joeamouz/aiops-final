@@ -1,0 +1,32 @@
+groups:
+  - name: aiops-demo
+    rules:
+      - alert: JuiceShopDown
+        expr: probe_success{app="juice-shop"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Juice Shop ne repond plus"
+          description: "La sonde Blackbox sur Juice Shop echoue depuis 1 minute."
+
+      - alert: KeepDown
+        expr: probe_success{app="keep"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Keep ne repond plus"
+          description: "La sonde Blackbox sur Keep (healthcheck) echoue depuis 1 minute."
+
+      - alert: JuiceShopHighErrorRate
+        expr: >
+          sum(rate(juice_shop_http_requests_total{status=~"5.."}[2m]))
+          /
+          sum(rate(juice_shop_http_requests_total[2m])) > 0.2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taux d'erreurs 5xx eleve sur Juice Shop"
+          description: "Plus de 20% des requetes recues par Juice Shop sur les 2 dernieres minutes sont en erreur 5xx."

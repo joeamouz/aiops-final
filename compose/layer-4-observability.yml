@@ -1,0 +1,120 @@
+networks:
+  aiops_default:
+    external: true
+
+volumes:
+  prometheus-data:
+    name: aiops_prometheus-data
+  grafana-data:
+    name: aiops_grafana-data
+  alertmanager-config:
+    name: aiops_alertmanager-config
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    container_name: aiops-prometheus
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+
+  grafana:
+    image: grafana/grafana:13.2.2
+    container_name: aiops-grafana
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: "admin"
+      GF_SECURITY_ADMIN_PASSWORD: "admin"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+
+  cadvisor:
+    image: ghcr.io/google/cadvisor:v0.60.6
+    container_name: aiops-cadvisor
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "8081:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.28.0
+    container_name: aiops-blackbox-exporter
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/config/blackbox.yml:ro
+    command:
+      - "--config.file=/config/blackbox.yml"
+
+  vector-metrics:
+    image: timberio/vector:0.58.0-debian
+    container_name: aiops-vector-metrics
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "9598:9598"
+    volumes:
+      - ./vector/vector-metrics.yaml:/etc/vector/vector.yaml:ro
+    command: ["--config", "/etc/vector/vector.yaml"]
+
+  alertmanager-config-init:
+    image: busybox:1.38.0
+    container_name: aiops-alertmanager-config-init
+    restart: "no"
+    networks:
+      - aiops_default
+    env_file:
+      - ../aiops/.env
+    volumes:
+      - ./alertmanager/alertmanager.yml.template:/template/alertmanager.yml.template:ro
+      - alertmanager-config:/config
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        KEY=$$(echo "$$KEEP_DEFAULT_API_KEYS" | tr ',' '\n' | grep '^orangeci-test:' | cut -d: -f3)
+        if [ -z "$$KEY" ]; then echo "ERREUR: cle orangeci-test introuvable dans KEEP_DEFAULT_API_KEYS" >&2; exit 1; fi
+        sed "s/__KEEP_WEBHOOK_API_KEY__/$$KEY/" /template/alertmanager.yml.template > /config/alertmanager.yml
+        echo "alertmanager.yml genere avec succes"
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.1
+    container_name: aiops-alertmanager
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "9093:9093"
+    volumes:
+      - alertmanager-config:/etc/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    depends_on:
+      - alertmanager-config-init
