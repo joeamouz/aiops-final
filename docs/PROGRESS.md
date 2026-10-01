@@ -11,7 +11,7 @@ Dernière mise à jour : 2026-10-01
 | 2 | Log Collection | ✅ Validée | 2026-10-01 |
 | 3 | Ingestion / Stream Processing | ✅ Validée | 2026-10-01 |
 | 4 | Observabilité & Métriques | ✅ Validée | 2026-10-01 |
-| 5 | Moteur Prédictif | ✅ Installée et testée, en attente de "VALIDÉ couche 5" | — |
+| 5 | Moteur Prédictif | ✅ Validée | 2026-10-01 |
 | 6 | Keep (existant à configurer) | ⏳ Providers/workflows à ajouter | — |
 | 7 | Alerting | ⏳ Non démarré | — |
 
