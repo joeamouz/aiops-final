@@ -9,7 +9,7 @@ Dernière mise à jour : 2026-10-01
 | 0 | Audit (lecture seule) | ✅ Fait, en attente de validation utilisateur | — |
 | 1 | Applications (Juice Shop) | ⏳ Générateur de trafic à créer | — |
 | 2 | Log Collection | ✅ Validée | 2026-10-01 |
-| 3 | Ingestion / Stream Processing | ✅ Installée et testée, en attente de "VALIDÉ couche 3" | — |
+| 3 | Ingestion / Stream Processing | ✅ Validée | 2026-10-01 |
 | 4 | Observabilité & Métriques | ⏳ Non démarré | — |
 | 5 | Moteur Prédictif | ⏳ Non démarré | — |
 | 6 | Keep (existant à configurer) | ⏳ Providers/workflows à ajouter | — |
