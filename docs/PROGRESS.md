@@ -9,7 +9,7 @@ Dernière mise à jour : 2026-10-01
 | 0 | Audit (lecture seule) | ✅ Fait, en attente de validation utilisateur | — |
 | 1 | Applications (Juice Shop) | ⏳ Générateur de trafic à créer | — |
 | 2 | Log Collection | ✅ Validée | 2026-10-01 |
-| 3 | Ingestion / Stream Processing | ⏳ Non démarré | — |
+| 3 | Ingestion / Stream Processing | ✅ Installée et testée, en attente de "VALIDÉ couche 3" | — |
 | 4 | Observabilité & Métriques | ⏳ Non démarré | — |
 | 5 | Moteur Prédictif | ⏳ Non démarré | — |
 | 6 | Keep (existant à configurer) | ⏳ Providers/workflows à ajouter | — |
@@ -66,13 +66,51 @@ docker volume rm aiops_vector-output   # si on veut aussi supprimer les donnees 
 kubectl rollout undo -n juice-shop deployment juice-shop
 ```
 
+## Couche 3 — Rapport (installation et tests, 2026-10-01)
+
+| Vérification | Résultat | Preuve |
+|---|---|---|
+| Cluster Redpanda `v26.2.3` healthy | PASS | `rpk cluster health` → `Healthy: true` |
+| Topics `logs.raw` / `logs.parsed` / `anomalies` créés | PASS | `rpk topic list` |
+| Vector routeur actif, consomme `logs.raw` | PASS | `rpk group describe vector-router` → `STATE Stable` |
+| Messages en temps réel dans `logs.raw` | PASS | `rpk topic consume logs.raw` après appel `/healthcheck` Keep |
+| Normalisation : extraction `http_status`/`http_method`/`http_path` (Juice Shop) | PASS | `http_status":401` (login), `http_status":500` (produit inexistant) dans `logs.parsed` |
+| Niveau dérivé du code HTTP (4xx→warn, 5xx→error) | PASS | `"level":"warn"` pour 401, `"level":"error"` pour 500 |
+| Lag consumer `vector-router` proche de 0 | PASS | `TOTAL-LAG 0-4` (bruit de fond = heartbeats Keep) |
+| Redémarrage du routeur sans perte de messages | PASS | Après `docker restart aiops-vector-router`, le consumer group reprend à l'offset committé (201), pas de reset à 0, lag revenu à 2 puis stable |
+
+**Script de test** : `tests/layer-3/test_redpanda_pipeline.sh` — **9/9 PASS**.
+
+**Bonus constaté** : une requête vers un produit inexistant (`/rest/products/9999999`) a
+déclenché une vraie 500 côté Juice Shop, et Vector a capturé **à la fois** la ligne
+d'accès HTTP (`status 500`) et la stack trace applicative complète (`stderr`,
+`console.error`) — donnée précieuse pour la corrélation en couche 5/6.
+
+**Pipeline validé** : Juice Shop/Keep → Vector (collecteur, sink Kafka `logs.raw`) →
+Redpanda → Vector (routeur, consumer group `vector-router`) → normalisation VRL →
+Redpanda (`logs.parsed`).
+
+**Impact sur l'existant** : aucun. Services additifs uniquement (`aiops-redpanda`,
+`aiops-redpanda-console`, `aiops-vector-router`, `aiops-redpanda-topics-init` one-shot).
+
+**Rollback** :
+```bash
+docker compose -f compose/layer-3-ingestion.yml down
+docker volume rm aiops_redpanda-data   # si on veut aussi supprimer les donnees Kafka
+```
+
 ## URLs et ports utiles (existant)
 - Keep UI : http://localhost:3000
 - Keep API : http://localhost:8080
 - demo-app : http://localhost:8000
-- Vector API (tap/top) : http://localhost:8686
-  - `docker exec -it aiops-vector vector top --url http://localhost:8686`
-  - `docker logs -f aiops-vector` (sortie console des événements enrichis)
+- Vector API collecteur (tap/top) : http://localhost:8686
+  - `docker exec -it aiops-vector vector top --url http://localhost:8686` (interactif, terminal requis)
+  - `docker exec aiops-vector vector tap --url http://localhost:8686` (flux, pas de TTY requis)
+- Vector API routeur : http://localhost:8687
+- Redpanda Console (UI topics/consumers) : http://localhost:8089
+- Redpanda broker (externe) : localhost:19092 ; admin : localhost:9644
+- `docker exec aiops-redpanda rpk topic consume logs.parsed -o 0`
+- `docker exec aiops-redpanda rpk group describe vector-router`
 - Juice Shop (k8s) : pas de port hôte, ClusterIP interne 10.99.141.65:3000
   (joignable depuis le réseau Docker `aiops_default`)
 
@@ -85,10 +123,18 @@ kubectl rollout undo -n juice-shop deployment juice-shop
 
 ## Points en attente de décision utilisateur
 1. ~~Logs HTTP Juice Shop~~ → **Résolu** : Option A (sidecar) implémentée et testée.
-2. RAM Docker Desktop (7.66 Gio actuel) : à augmenter si possible (10-12 Gio recommandé)
-   pour Kafka/Redpanda + Prometheus + Grafana + moteur ML.
+2. ~~RAM Docker Desktop~~ → **Résolu** : reste à 7.66 Gio, Redpanda choisi en consequence.
 3. Secrets couche 6/7 (clés API Keep, webhook Slack, clé PagerDuty) : à fournir au
    moment voulu, jamais committés (`.env` dans `.gitignore`, `.env.example` fourni).
+
+## Point mineur connu (cosmétique)
+Les fichiers `compose/layer-2-collect.yml` et `compose/layer-3-ingestion.yml` n'ont
+pas de `name:` de projet Compose explicite : Docker Compose avertit "orphan
+containers" quand on lance l'un après l'autre depuis le même dossier (chacun voit les
+conteneurs de l'autre comme "orphelins" de son propre projet implicite). Sans impact
+(rien n'est supprimé), mais à corriger proprement dans une passe ultérieure (ajouter
+`name: aiops-layer2` / `name: aiops-layer3`) — pas fait maintenant pour ne pas
+recréer inutilement les conteneurs de la couche 2 déjà validée.
 
 ## Commandes utiles
 ```bash

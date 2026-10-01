@@ -1,0 +1,84 @@
+networks:
+  aiops_default:
+    external: true
+
+volumes:
+  redpanda-data:
+    name: aiops_redpanda-data
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+    container_name: aiops-redpanda
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --memory
+      - "768M"
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    ports:
+      - "19092:19092"
+      - "9644:9644"
+      - "18081:18081"
+      - "18082:18082"
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    networks:
+      - aiops_default
+
+  redpanda-console:
+    image: docker.redpanda.com/redpandadata/console:v3.12.0
+    container_name: aiops-redpanda-console
+    restart: unless-stopped
+    environment:
+      KAFKA_BROKERS: "redpanda:9092"
+    ports:
+      - "8089:8080"
+    networks:
+      - aiops_default
+    depends_on:
+      - redpanda
+
+  redpanda-topics-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v26.2.3
+    container_name: aiops-redpanda-topics-init
+    restart: "no"
+    networks:
+      - aiops_default
+    depends_on:
+      - redpanda
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until rpk cluster info --brokers redpanda:9092 >/dev/null 2>&1; do sleep 1; done
+        rpk topic create logs.raw logs.parsed anomalies --brokers redpanda:9092 || true
+        rpk topic list --brokers redpanda:9092
+
+  vector-router:
+    image: timberio/vector:0.58.0-debian
+    container_name: aiops-vector-router
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    depends_on:
+      - redpanda
+    volumes:
+      - ./vector/vector-router.yaml:/etc/vector/vector.yaml:ro
+    command: ["--config", "/etc/vector/vector.yaml"]

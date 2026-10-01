@@ -1,0 +1,53 @@
+api:
+  enabled: true
+  address: "0.0.0.0:8687"
+
+sources:
+  logs_raw_in:
+    type: kafka
+    bootstrap_servers: "redpanda:9092"
+    group_id: "vector-router"
+    topics:
+      - "logs.raw"
+    decoding:
+      codec: json
+
+transforms:
+  normalize:
+    type: remap
+    inputs:
+      - "logs_raw_in"
+    source: |
+      if .app == "juice-shop" {
+        parsed, err = parse_regex(string!(.message), r'"(?P<method>\S+) (?P<path>\S+) HTTP/\d\.\d" (?P<status>\d{3}) (?P<size>\S+)')
+        if err == null {
+          .http_method = parsed.method
+          .http_path = parsed.path
+          .http_status = to_int(parsed.status) ?? 0
+          if .http_status >= 500 {
+            .level = "error"
+          } else if .http_status >= 400 {
+            .level = "warn"
+          } else {
+            .level = "info"
+          }
+        }
+      }
+      .routed_at = now()
+
+sinks:
+  console_debug:
+    type: console
+    inputs:
+      - "normalize"
+    encoding:
+      codec: json
+
+  kafka_logs_parsed:
+    type: kafka
+    inputs:
+      - "normalize"
+    bootstrap_servers: "redpanda:9092"
+    topic: "logs.parsed"
+    encoding:
+      codec: json

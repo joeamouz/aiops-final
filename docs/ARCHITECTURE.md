@@ -56,9 +56,10 @@ Fichiers compose existants (non modifiés) : `aiops/docker-compose.orangeci.yml`
 | 6 | Keep WebSocket (Soketi) | 6001, 9601 | existant |
 | (démo) | demo-app | 8000 | existant |
 | 2 | Vector API (tap/top) | 8686 | à créer |
-| 3 | Kafka / Redpanda (broker) | 9092 | à créer |
-| 3 | Redpanda admin | 9644 | à créer |
-| 3 | Kafka UI / Redpanda Console | 8089 | à créer |
+| 3 | Redpanda (broker externe) | 19092 | ✅ créé |
+| 3 | Redpanda admin | 9644 | ✅ créé |
+| 3 | Redpanda Console | 8089 | ✅ créé |
+| 3 | Vector routeur (API) | 8687 | ✅ créé |
 | 4 | Prometheus | 9090 | à créer |
 | 4 | Alertmanager | 9093 | à créer |
 | 4 | Grafana | **3001** (3000 pris par Keep) | à créer |

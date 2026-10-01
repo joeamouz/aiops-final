@@ -45,3 +45,12 @@ sinks:
     path: "/var/lib/vector/output/events-%Y-%m-%d.log"
     encoding:
       codec: json
+
+  kafka_logs_raw:
+    type: kafka
+    inputs:
+      - "enrich"
+    bootstrap_servers: "redpanda:9092"
+    topic: "logs.raw"
+    encoding:
+      codec: json
