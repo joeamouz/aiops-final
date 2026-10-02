@@ -12,8 +12,8 @@ Dernière mise à jour : 2026-10-01
 | 3 | Ingestion / Stream Processing | ✅ Validée | 2026-10-01 |
 | 4 | Observabilité & Métriques | ✅ Validée | 2026-10-01 |
 | 5 | Moteur Prédictif | ✅ Validée | 2026-10-01 |
-| 6 | Keep (existant à configurer) | ⚠️ Partielle (montage obsolète corrigé ; règle de corrélation + confirmation UI restantes) | — |
-| 7 | Alerting | ⏳ Non démarré | — |
+| 6 | Keep (existant à configurer) | ⚠️ Quasi-complète (workflow exécuté confirmé ; règle de corrélation manuelle restante) | — |
+| 7 | Alerting | ✅ Installée et testée (récepteurs factices), en attente de "VALIDÉ couche 7" | — |
 
 ## Couche 2 — Rapport (installation et tests, 2026-10-01)
 
@@ -428,21 +428,102 @@ l'enrichissement/corrélation.
    doit pas forger ses propres élévations de privilèges. **À créer manuellement**
    dans l'UI Keep (Correlation > New rule) : CEL `service == "juice-shop"`,
    fenêtre 180s, regroupement par `service`.
-2. **Confirmation visuelle de l'exécution du workflow** et de la présence du
-   provider dans l'UI Keep (voir ci-dessus).
+2. ~~Confirmation visuelle de l'exécution du workflow~~ → **Résolu** (voir
+   addendum ci-dessous : exécutions confirmées dans les logs, bug de
+   bootstrap des providers corrigé).
+
+### Addendum — Exécution du workflow confirmée (2026-10-02)
+**Bug trouvé et corrigé** : les actions `notify-slack`/`enrich-and-prioritize`
+référençaient leur provider seulement par `type:` (ex. `type: slack`), sans
+`config:`. Keep interprète alors le **nom du type** comme `provider_id` et tente
+d'instancier un provider vide (`"Error getting provider slack for action
+notify-slack"` → `Exception: Slack webhook url OR Slack access token is
+required`). **Corrigé** en ajoutant `config: "{{ providers.<nom-du-provider> }}"`
+dans chaque action (référence explicite à l'instance installée par son `name:`).
+
+Après correction et recréation de `keep-backend` (healthy en ~5 min sous charge) :
+- `num_of_workflows: 4` confirmé.
+- Logs `"Running workflow ..."` / `"Got all workflows"` avec
+  `context: {"step_id": "enrich-and-prioritize"}` répétés — **le workflow
+  couche 6 s'exécute réellement**, plus seulement chargé.
+- **Bug cosmétique corrigé en passant** : le template de `enrich-and-prioritize`
+  concaténait `{{ alert.description }}` à chaque exécution, provoquant une
+  croissance illimitée de la description sur une alerte persistante (le même
+  texte "Enrichi par..." répété 5 fois observé). Corrigé en ne référençant plus
+  la description précédente (template statique basé sur les champs stables de
+  l'alerte).
 
 ### Fichiers créés (hors de ce dépôt git — `aiops/` est un dépôt séparé, non versionné ici)
 - `aiops/providers/prometheus-local.yaml`
+- `aiops/providers/slack-local.yaml`, `aiops/providers/pagerduty-local.yaml` (couche 7)
 - `aiops/workflows/juice-shop-enrich-prioritize.yml`
+- `aiops/workflows/alerting-routing.yml` (couche 7)
 
 ### Fichiers créés (dans ce dépôt)
 - `scripts/keep-admin/create_correlation_rule.py` (pret a l'emploi si une
   permission Bash est ajoutee par l'utilisateur pour ce type d'action)
 
 ### Impact sur l'existant
-`keep-backend` redémarré (accord explicite). Fichiers ajoutés dans `aiops/providers/`
-et `aiops/workflows/` (répertoires d'extension prévus par la stack existante,
-documentés dans `aiops/README.md`).
+`keep-backend` redémarré plusieurs fois (accord explicite chaque fois). Fichiers
+ajoutés dans `aiops/providers/` et `aiops/workflows/` (répertoires d'extension
+prévus par la stack existante, documentés dans `aiops/README.md`).
+
+## Couche 7 — Rapport (installation et tests, 2026-10-02)
+
+### Contexte
+Pas de compte Slack ni PagerDuty disponible (création de compte tiers refusée
+par principe : nécessite une vérification email que je ne peux pas effectuer,
+et la propriété d'un tel compte doit rester entre les mains de l'utilisateur).
+**Récepteur HTTP factice local** utilisé à la place, comme explicitement prévu
+par CLAUDE.md pour ce cas.
+
+### Fait et vérifié
+- **`services/fake-notifier`** (FastAPI) : simule Slack (`/slack`) et PagerDuty
+  Events API v2 (`/pagerduty`), avec un historique interrogeable (`/received`).
+  Déployé via `compose/layer-7-alerting.yml`.
+- **Provider Slack** (`aiops/providers/slack-local.yaml`, type natif `slack`,
+  `webhook_url` → récepteur factice). Pour un vrai Slack : changer uniquement
+  `webhook_url`.
+- **Provider PagerDuty factice** (`aiops/providers/pagerduty-local.yaml`, type
+  `webhook` générique). **Limitation technique découverte** : le provider natif
+  `pagerduty` de Keep cible en dur `https://events.pagerduty.com/v2/enqueue`
+  (non redirigeable) — impossible à tester sans compte réel. Pour passer à un
+  vrai PagerDuty : créer un provider type `pagerduty` avec `routing_key`, et
+  changer `type: webhook` → `type: pagerduty` dans l'action concernée.
+- **Workflow de routage** (`aiops/workflows/alerting-routing.yml`) : se
+  déclenche sur toute alerte ; `notify-slack` inconditionnel, `notify-pagerduty-
+  critical` conditionné à `severity == 'critical'`.
+
+### Résultat du test (preuve réelle, pas simulée)
+| Vérification | Résultat | Preuve |
+|---|---|---|
+| Récepteur factice actif et interrogeable | PASS | `/health` → `200` |
+| Messages Slack reçus (toutes sévérités) | PASS | **50** messages reçus |
+| Messages PagerDuty reçus | PASS | **1** message reçu |
+| **Le message PagerDuty correspond à une alerte critique** | PASS | `payload.severity == "critical"`, alerte `KeepDown` (sévérité critique d'origine) |
+| Aucune alerte non-critique n'a atteint PagerDuty | PASS | 1 seul message PagerDuty pour 50 Slack — cohérent avec la règle (critique uniquement) |
+
+**Script de test** : `tests/layer-7/test_alerting_routing.sh` — **5/5 PASS**.
+
+### Point d'attention — mémoire système
+Pendant les tests, le système hôte a signalé une **mémoire faible** (tâche
+d'arrière-plan tuée automatiquement). Conteneur de trafic de test en boucle
+arrêté immédiatement par précaution. ~24 conteneurs tournent simultanément
+(couches 2-7 cumulées) ; recommandation : fermer les applications non
+essentielles, ou augmenter la RAM allouée à Docker Desktop, avant de pousser
+plus de charge de test.
+
+### Impact sur l'existant
+Additif uniquement (`aiops-fake-notifier`), plus les mêmes redémarrages de
+`keep-backend` que la couche 6 (accord explicite).
+
+### Rollback
+```bash
+docker compose -f compose/layer-7-alerting.yml down
+docker rmi aiops-fake-notifier:local
+# Retirer aiops/providers/slack-local.yaml, aiops/providers/pagerduty-local.yaml,
+# aiops/workflows/alerting-routing.yml, puis recreer keep-backend.
+```
 
 ## URLs et ports utiles (existant)
 - Keep UI : http://localhost:3000
@@ -466,6 +547,8 @@ documentés dans `aiops/README.md`).
 - Moteur prédictif (ml-engine) : http://localhost:8001
   - `GET /health`, `GET /status` (mode, compteurs, dernière anomalie)
   - `POST /train/start` (reset + apprentissage), `POST /train/stop` (passage en scoring)
+- Récepteur factice Slack/PagerDuty (couche 7) : http://localhost:8002
+  - `GET /received` (historique recu), `POST /received/reset`
 - Juice Shop (k8s) : pas de port hôte, ClusterIP interne 10.99.141.65:3000
   (joignable depuis le réseau Docker `aiops_default`)
 

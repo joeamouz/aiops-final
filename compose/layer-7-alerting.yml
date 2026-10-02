@@ -1,0 +1,15 @@
+networks:
+  aiops_default:
+    external: true
+
+services:
+  fake-notifier:
+    build:
+      context: ../services/fake-notifier
+    image: aiops-fake-notifier:local
+    container_name: aiops-fake-notifier
+    restart: unless-stopped
+    networks:
+      - aiops_default
+    ports:
+      - "8002:8002"
