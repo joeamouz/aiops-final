@@ -532,7 +532,8 @@ docker rmi aiops-fake-notifier:local
 - Vector API collecteur (tap/top) : http://localhost:8686
   - `docker exec -it aiops-vector vector top --url http://localhost:8686` (interactif, terminal requis)
   - `docker exec aiops-vector vector tap --url http://localhost:8686` (flux, pas de TTY requis)
-- Vector API routeur : http://localhost:8687
+- Vector API routeur : **non exposee sur l'hote** (port 8687 interne au reseau
+  `aiops_default` uniquement) — `docker exec aiops-vector-router vector top --url http://localhost:8687`
 - Redpanda Console (UI topics/consumers) : http://localhost:8089
 - Redpanda broker (externe) : localhost:19092 ; admin : localhost:9644
 - `docker exec aiops-redpanda rpk topic consume logs.parsed -o 0`
